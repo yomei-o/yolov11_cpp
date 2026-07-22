@@ -1,3 +1,4 @@
+// (unfused variant)
 // yolo11n forward with conv + BatchNorm2d + SiLU kept SEPARATE (BN not folded), for BN
 // training and .pt write-back. Same topology/attention as net11.hpp. Consumes layers in
 // the order export_unfused11.py emits them.

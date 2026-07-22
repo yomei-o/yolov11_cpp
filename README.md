@@ -26,6 +26,8 @@ DFL, so the **loss (DFL + TAL + CIoU + BCE) and decode are reused from yolov8** 
 | `pure/metrics.hpp` + `pure/m5_map.cpp` | **COCO mAP** (AP@0.50, AP@0.50:0.95) | match pycocotools ~3e-7 |
 | `pure/net11_unfused.hpp` + `pure/m6_unfused.cpp` | unfused conv+BN+SiLU forward | matches yolo11n ~2e-5 |
 | `pure/m7_train_writeback.cpp` | **train (live BN) → write weights back to `.pt`** | serialization exact; yolo11 reloads it |
+| `pure/onnx_export11.cpp` | **ONNX writer** (incl. attention as Slice/Reshape/Transpose/MatMul/Softmax) | onnxruntime runs it, ~2e-5 |
+| `pure/onnx_run.hpp` + `pure/m8_onnx_run.cpp` | **ONNX reader + graph interpreter** | pure engine runs the `.onnx`, ~3e-5 |
 
 ## Demo — real-image detection, no Python, no libraries
 Weights ship in `weights/yolo11n/`, so the pure detector runs from a checkout with only a

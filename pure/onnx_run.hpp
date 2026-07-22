@@ -4,7 +4,8 @@
 #pragma once
 #include "onnx.hpp"
 #include "autograd.hpp"
-#include "ops2d.hpp"        // mul (elementwise)
+#include "ops2d.hpp"        // mul, mul_scalar, reshape, softmax_rows
+#include "linalg.hpp"       // matmul, transpose2d
 #include <map>
 #include <string>
 
@@ -39,12 +40,24 @@ inline std::map<std::string, Tensor> run_onnx(const Graph& g, const Tensor& x) {
     if (op == "Conv") {
       Tensor w = get(nd.input[1]);
       Tensor b = (nd.input.size() >= 3 && !nd.input[2].empty()) ? get(nd.input[2]) : nullptr;
-      int64_t stride = attr_i0(nd, "strides", 1), pad = attr_i0(nd, "pads", 0);
-      y = conv2d(get(nd.input[0]), w, b, stride, pad);
+      int64_t stride = attr_i0(nd, "strides", 1), pad = attr_i0(nd, "pads", 0), grp = attr_i0(nd, "group", 1);
+      y = conv2d(get(nd.input[0]), w, b, stride, pad, grp);
     } else if (op == "Sigmoid") {
       y = sigmoid(get(nd.input[0]));
     } else if (op == "Mul") {
-      y = mul(get(nd.input[0]), get(nd.input[1]));
+      Tensor a = get(nd.input[0]), b = get(nd.input[1]);
+      if (b->numel() == 1) y = mul_scalar(a, b->data[0]);
+      else if (a->numel() == 1) y = mul_scalar(b, a->data[0]);
+      else y = mul(a, b);
+    } else if (op == "MatMul") {
+      y = matmul(get(nd.input[0]), get(nd.input[1]));
+    } else if (op == "Softmax") {
+      y = softmax_rows(get(nd.input[0]));                 // exported over the last axis
+    } else if (op == "Transpose") {
+      y = transpose2d(get(nd.input[0]));                  // 2D perm [1,0]
+    } else if (op == "Reshape") {
+      auto* sh = imap.at(nd.input[1]);
+      y = reshape(get(nd.input[0]), std::vector<int64_t>(sh->data.begin(), sh->data.end()));
     } else if (op == "Add") {
       y = add(get(nd.input[0]), get(nd.input[1]));
     } else if (op == "MaxPool") {
