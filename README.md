@@ -21,9 +21,21 @@ DFL, so the **loss (DFL + TAL + CIoU + BCE) and decode are reused from yolov8** 
 | `pure/net11.hpp` + `pure/m1_forward.cpp` | **full yolo11n forward** (C3k2, C2PSA attention, DFL head) | matches yolo11n ~3e-5 |
 | `pure/mg_gconv.cpp` | grouped/depthwise conv (fwd+bwd) | matches torch ~1e-5 |
 | `pure/m2_train.cpp` | **end-to-end training** (forward → v8 loss + TAL → backward → Adam/cosine) | loss 12.9 → 1.7 |
+| `pure/infer.hpp` + `pure/m3_infer.cpp` | **inference: DFL decode + NMS** (reused from yolov8) | dets match yolo11n ~8e-5 |
+| `pure/m4_demo.cpp` | **real-image inference** (stb → letterbox → detect → annotate) | bus + 4 people |
 
-Planned next: decode + NMS inference, mAP, real-image demo, .pt/ONNX I/O (all reused
-from yolov8_cpp).
+## Demo — real-image detection, no Python, no libraries
+Weights ship in `weights/yolo11n/`, so the pure detector runs from a checkout with only a
+C++ compiler + the two vendored single-header libs:
+```sh
+g++ -std=c++20 -O2 -Ipure/third_party pure/m4_demo.cpp -o m4_demo
+./m4_demo assets/bus.jpg bus_out.png 640
+```
+| `assets/bus.jpg` → | `assets/zidane.jpg` → |
+|---|---|
+| ![bus](assets/bus_detected.png) | ![zidane](assets/zidane_detected.png) |
+
+These match yolo11n's own output (boxes ~8e-5 on the letterboxed input).
 
 ## Build
 ```sh
