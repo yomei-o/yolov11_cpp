@@ -43,6 +43,23 @@ inline Provider load_net_blob(const std::string& D) {
   return p;
 }
 
+// pack per-level (B,C,h,w) maps into (B*Atot, C), anchor-major per batch (for the loss).
+inline Tensor pack_levels(const std::vector<Tensor>& lv, int64_t B, int64_t Atot, int64_t C) {
+  auto o = make_tensor({B * Atot, C}, true);
+  int64_t off = 0;
+  for (auto& t : lv) { int64_t hw = t->shape[2] * t->shape[3];
+    for (int64_t b = 0; b < B; ++b) for (int64_t c = 0; c < C; ++c) for (int64_t a = 0; a < hw; ++a)
+      o->data[(b * Atot + off + a) * C + c] = t->data[((b * C + c) * hw) + a];
+    off += hw; }
+  o->parents = lv; Node* op = o.get();
+  o->backward_fn = [lv, op, B, Atot, C] { int64_t off = 0;
+    for (auto& t : lv) { int64_t hw = t->shape[2] * t->shape[3];
+      for (int64_t b = 0; b < B; ++b) for (int64_t c = 0; c < C; ++c) for (int64_t a = 0; a < hw; ++a)
+        t->grad[((b * C + c) * hw) + a] += op->grad[(b * Atot + off + a) * C + c];
+      off += hw; } };
+  return o;
+}
+
 inline Tensor conv_apply(const Tensor& x, ConvW& c) {
   auto y = conv2d(x, c.w, c.b, c.stride, c.pad, c.groups);
   return c.act ? silu(y) : y;
@@ -76,23 +93,29 @@ inline Tensor sppf(const Tensor& x, Provider& p) {
 // Multi-head attention (ultralytics Attention). qkv/proj/pe are the next 3 convs.
 inline Tensor attention(const Tensor& x, Provider& p, int64_t heads, int64_t key_dim, int64_t head_dim) {
   ConvW qkv = p.next(), proj = p.next(), pe = p.next();
-  auto qkvo = conv_apply(x, qkv);                      // (1,h,H,W), act=False
-  int64_t H = x->shape[2], W = x->shape[3], N = H * W, per = 2 * key_dim + head_dim;
+  auto qkvo = conv_apply(x, qkv);                      // (B,h,H,W), act=False (conv is batch-aware)
+  int64_t B = x->shape[0], H = x->shape[2], W = x->shape[3], N = H * W, per = 2 * key_dim + head_dim;
   float scale = 1.f / std::sqrt((float)key_dim);
-  std::vector<Tensor> xatt, vfull;
-  for (int64_t hh = 0; hh < heads; ++hh) {
-    int64_t off = hh * per;
-    auto q = reshape(slice_ch(qkvo, off, off + key_dim), {key_dim, N});
-    auto k = reshape(slice_ch(qkvo, off + key_dim, off + 2 * key_dim), {key_dim, N});
-    auto v = reshape(slice_ch(qkvo, off + 2 * key_dim, off + per), {head_dim, N});
-    auto attn = softmax_rows(mul_scalar(matmul(transpose2d(q), k), scale));   // (N,N), softmax over cols
-    auto outh = matmul(v, transpose2d(attn));                                 // (head_dim, N)
-    xatt.push_back(reshape(outh, {1, head_dim, H, W}));
-    vfull.push_back(reshape(v, {1, head_dim, H, W}));
+  std::vector<Tensor> xa_b, vf_b;                       // per-batch assembled (1,dim,H,W)
+  for (int64_t b = 0; b < B; ++b) {
+    auto qb = slice_batch(qkvo, b);                    // (1,h,H,W)
+    std::vector<Tensor> xatt, vfull;
+    for (int64_t hh = 0; hh < heads; ++hh) {
+      int64_t off = hh * per;
+      auto q = reshape(slice_ch(qb, off, off + key_dim), {key_dim, N});
+      auto k = reshape(slice_ch(qb, off + key_dim, off + 2 * key_dim), {key_dim, N});
+      auto v = reshape(slice_ch(qb, off + 2 * key_dim, off + per), {head_dim, N});
+      auto attn = softmax_rows(mul_scalar(matmul(transpose2d(q), k), scale));   // (N,N)
+      auto outh = matmul(v, transpose2d(attn));                                 // (head_dim,N)
+      xatt.push_back(reshape(outh, {1, head_dim, H, W}));
+      vfull.push_back(reshape(v, {1, head_dim, H, W}));
+    }
+    xa_b.push_back(concat_ch(xatt));                   // (1,dim,H,W)
+    vf_b.push_back(concat_ch(vfull));
   }
-  auto xa = concat_ch(xatt);                            // (1, dim, H, W)
-  auto pev = conv_apply(concat_ch(vfull), pe);          // depthwise pe, act=False
-  return conv_apply(add(xa, pev), proj);                // proj, act=False
+  auto xa = concat_batch(xa_b);                        // (B,dim,H,W)
+  auto pev = conv_apply(concat_batch(vf_b), pe);       // depthwise pe, act=False
+  return conv_apply(add(xa, pev), proj);               // proj, act=False
 }
 inline Tensor c2psa(const Tensor& x, Provider& p, int64_t n, int64_t heads, int64_t key_dim, int64_t head_dim) {
   auto y = conv_apply(x, p.next());                     // cv1 -> 2*dim

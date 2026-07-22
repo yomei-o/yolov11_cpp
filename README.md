@@ -20,9 +20,10 @@ DFL, so the **loss (DFL + TAL + CIoU + BCE) and decode are reused from yolov8** 
 |------|-----------|--------|
 | `pure/net11.hpp` + `pure/m1_forward.cpp` | **full yolo11n forward** (C3k2, C2PSA attention, DFL head) | matches yolo11n ~3e-5 |
 | `pure/mg_gconv.cpp` | grouped/depthwise conv (fwd+bwd) | matches torch ~1e-5 |
+| `pure/m2_train.cpp` | **end-to-end training** (forward → v8 loss + TAL → backward → Adam/cosine) | loss 12.9 → 1.7 |
 
-Planned next: reuse yolov8's v8 loss + TAL for training, decode + NMS inference, mAP,
-real-image demo, .pt/ONNX I/O.
+Planned next: decode + NMS inference, mAP, real-image demo, .pt/ONNX I/O (all reused
+from yolov8_cpp).
 
 ## Build
 ```sh

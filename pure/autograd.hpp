@@ -44,11 +44,18 @@ inline Tensor from_data(std::vector<int64_t> shape, std::vector<float> data, boo
 }
 
 // ---- topological order + backward ----
-inline void build_topo(const Tensor& v, std::unordered_set<Node*>& seen, std::vector<Tensor>& order) {
-  if (!v || seen.count(v.get())) return;
-  seen.insert(v.get());
-  for (auto& p : v->parents) build_topo(p, seen, order);
-  order.push_back(v);
+// Iterative post-order DFS (parents before node) — avoids deep recursion on large graphs.
+inline void build_topo(const Tensor& root, std::unordered_set<Node*>& seen, std::vector<Tensor>& order) {
+  if (!root || seen.count(root.get())) return;
+  std::vector<std::pair<Tensor, size_t>> st;
+  seen.insert(root.get()); st.push_back({root, 0});
+  while (!st.empty()) {
+    auto& top = st.back();
+    if (top.second < top.first->parents.size()) {
+      auto& p = top.first->parents[top.second++];
+      if (p && !seen.count(p.get())) { seen.insert(p.get()); st.push_back({p, 0}); }
+    } else { order.push_back(top.first); st.pop_back(); }
+  }
 }
 inline void backward(const Tensor& root) {
   std::vector<Tensor> order; std::unordered_set<Node*> seen;
@@ -58,6 +65,15 @@ inline void backward(const Tensor& root) {
   root->grad[0] = 1.f;
   for (auto it = order.rbegin(); it != order.rend(); ++it)
     if ((*it)->backward_fn) (*it)->backward_fn();
+}
+
+// Tear down the tape iteratively: clearing every reachable node's parents/closure so the
+// graph is freed in a flat loop instead of a deep recursive shared_ptr destructor chain
+// (which overflows the stack for large graphs, e.g. attention). Call after backward+step.
+inline void free_graph(const Tensor& root) {
+  std::vector<Tensor> order; std::unordered_set<Node*> seen;
+  build_topo(root, seen, order);
+  for (auto& t : order) { t->parents.clear(); t->backward_fn = nullptr; }
 }
 
 // ---- elementwise binary (same shape) ----
@@ -323,6 +339,25 @@ inline Tensor concat_ch(const std::vector<Tensor>& xs) {
       coff += C;
     }
   };
+  return o;
+}
+
+// slice one batch item b -> (1,C,H,W).
+inline Tensor slice_batch(const Tensor& x, int64_t b) {
+  int64_t B = x->shape[0], C = x->shape[1], H = x->shape[2], W = x->shape[3], CHW = C * H * W;
+  auto o = make_tensor({1, C, H, W}, true);
+  std::copy_n(&x->data[b * CHW], CHW, o->data.begin());
+  o->parents = {x}; Node* op = o.get();
+  o->backward_fn = [x, op, b, CHW] { for (int64_t i = 0; i < CHW; ++i) x->grad[b * CHW + i] += op->grad[i]; };
+  return o;
+}
+// concat along batch dim (dim=0). Each input (1,C,H,W) -> (B,C,H,W).
+inline Tensor concat_batch(const std::vector<Tensor>& xs) {
+  int64_t B = (int64_t)xs.size(), C = xs[0]->shape[1], H = xs[0]->shape[2], W = xs[0]->shape[3], CHW = C * H * W;
+  auto o = make_tensor({B, C, H, W}, true);
+  for (int64_t b = 0; b < B; ++b) std::copy_n(xs[b]->data.begin(), CHW, &o->data[b * CHW]);
+  o->parents = xs; Node* op = o.get();
+  o->backward_fn = [xs, op, B, CHW] { for (int64_t b = 0; b < B; ++b) for (int64_t i = 0; i < CHW; ++i) xs[b]->grad[i] += op->grad[b * CHW + i]; };
   return o;
 }
 
