@@ -23,6 +23,7 @@ DFL, so the **loss (DFL + TAL + CIoU + BCE) and decode are reused from yolov8** 
 | `pure/m2_train.cpp` | **end-to-end training** (forward → v8 loss + TAL → backward → Adam/cosine) | loss 12.9 → 1.7 |
 | `pure/infer.hpp` + `pure/m3_infer.cpp` | **inference: DFL decode + NMS** (reused from yolov8) | dets match yolo11n ~8e-5 |
 | `pure/m4_demo.cpp` | **real-image inference** (stb → letterbox → detect → annotate) | bus + 4 people |
+| `pure/metrics.hpp` + `pure/m5_map.cpp` | **COCO mAP** (AP@0.50, AP@0.50:0.95) | match pycocotools ~3e-7 |
 
 ## Demo — real-image detection, no Python, no libraries
 Weights ship in `weights/yolo11n/`, so the pure detector runs from a checkout with only a
