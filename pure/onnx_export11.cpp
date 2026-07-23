@@ -12,6 +12,7 @@ int main() {
   const std::string D = "pure/ref/data_net/";
   auto prov = load_net(D);
   std::ifstream io(D + "io.txt"); int64_t IMG, nc, na, no, nl; io >> IMG >> nc >> na >> no >> nl;
+  int64_t psa_n; std::vector<int64_t> cn,ci; std::vector<int> cc; { std::ifstream f(D+"arch11.txt"); f>>psa_n; int64_t a,b2,c2; while(f>>a>>b2>>c2){cn.push_back(a);cc.push_back((int)b2);ci.push_back(c2);} }
   Graph g; g.opset = 13;
   g.inputs.push_back({"images", {1, 3, IMG, IMG}});
   int uid = 0;
@@ -44,7 +45,7 @@ int main() {
 
   auto attention=[&](const std::string&x,int64_t H,int64_t W){
     ConvW& qkvw=prov.next(); ConvW& projw=prov.next(); ConvW& pew=prov.next();  // manifest order
-    int64_t heads=2,kd=32,hd=64,per=2*kd+hd,N=H*W; float scale=1.f/std::sqrt((float)kd);
+    int64_t kd=32,hd=64,per=2*kd+hd,heads=qkvw.w->shape[0]/per,N=H*W; float scale=1.f/std::sqrt((float)kd);
     std::string qkv=conv_from(x,qkvw); std::vector<std::string> xatt,vfull;
     for(int64_t hh=0;hh<heads;++hh){ int64_t off=hh*per;
       std::string q=reshape(slice(qkv,off,off+kd),{kd,N}), k=reshape(slice(qkv,off+kd,off+2*kd),{kd,N}), v=reshape(slice(qkv,off+2*kd,off+per),{hd,N});
@@ -57,15 +58,15 @@ int main() {
   auto c3k=[&](const std::string&x,int nb){std::string last=conv(x);for(int i=0;i<nb;++i){std::string h=conv(last);h=conv(h);last=add(h,last);}std::string y2=conv(x);return conv(concat({last,y2}));};
   auto c3k2=[&](const std::string&x,int n,bool is_c3k,int inner)->std::string{std::string y0=conv(x);/*need channels*/ int64_t twoc=prov.convs[prov.i-1].w->shape[0],c=twoc/2;std::vector<std::string> outs={slice(y0,0,c),slice(y0,c,twoc)};std::string last=outs[1];for(int j=0;j<n;++j){last=is_c3k?c3k(last,inner):[&]{std::string h=conv(last);h=conv(h);return add(h,last);}();outs.push_back(last);}return conv(concat(outs));};
   auto sppf=[&](const std::string&x){std::string x1=conv(x),q1=maxpool(x1),q2=maxpool(q1),q3=maxpool(q2);return conv(concat({x1,q1,q2,q3}));};
-  auto c2psa=[&](const std::string&x,int64_t H,int64_t W){std::string y=conv(x);int64_t twoc=prov.convs[prov.i-1].w->shape[0],dim=twoc/2;std::string a=slice(y,0,dim),b=slice(y,dim,twoc);b=add(b,attention(b,H,W));std::string f=conv(b);f=conv(f);b=add(b,f);return conv(concat({a,b}));};
+  auto c2psa=[&](const std::string&x,int64_t n,int64_t H,int64_t W){std::string y=conv(x);int64_t twoc=prov.convs[prov.i-1].w->shape[0],dim=twoc/2;std::string a=slice(y,0,dim),b=slice(y,dim,twoc);for(int64_t j=0;j<n;++j){b=add(b,attention(b,H,W));std::string f=conv(b);f=conv(f);b=add(b,f);}return conv(concat({a,b}));};
 
   int64_t S=IMG;
-  std::string x0=conv("images"),x1=conv(x0),x2=c3k2(x1,1,false,0),x3=conv(x2),x4=c3k2(x3,1,false,0),
-    x5=conv(x4),x6=c3k2(x5,1,true,2),x7=conv(x6),x8=c3k2(x7,1,true,2),x9=sppf(x8),
-    x10=c2psa(x9,S/32,S/32),x11=resize(x10),x12=concat({x11,x6}),x13=c3k2(x12,1,false,0),
-    x14=resize(x13),x15=concat({x14,x4}),x16=c3k2(x15,1,false,0),
-    x17=conv(x16),x18=concat({x17,x13}),x19=c3k2(x18,1,false,0),
-    x20=conv(x19),x21=concat({x20,x10}),x22=c3k2(x21,1,true,2);
+  std::string x0=conv("images"),x1=conv(x0),x2=c3k2(x1,cn[0],cc[0],ci[0]),x3=conv(x2),x4=c3k2(x3,cn[1],cc[1],ci[1]),
+    x5=conv(x4),x6=c3k2(x5,cn[2],cc[2],ci[2]),x7=conv(x6),x8=c3k2(x7,cn[3],cc[3],ci[3]),x9=sppf(x8),
+    x10=c2psa(x9,psa_n,S/32,S/32),x11=resize(x10),x12=concat({x11,x6}),x13=c3k2(x12,cn[4],cc[4],ci[4]),
+    x14=resize(x13),x15=concat({x14,x4}),x16=c3k2(x15,cn[5],cc[5],ci[5]),
+    x17=conv(x16),x18=concat({x17,x13}),x19=c3k2(x18,cn[6],cc[6],ci[6]),
+    x20=conv(x19),x21=concat({x20,x10}),x22=c3k2(x21,cn[7],cc[7],ci[7]);
   std::string ins[3]={x16,x19,x22};
   for(int i=0;i<3;++i){ std::string hb=conv(ins[i]);hb=conv(hb);std::string box=conv(hb);
     std::string hc=conv(ins[i]);hc=conv(hc);hc=conv(hc);hc=conv(hc);std::string cls=conv(hc);
