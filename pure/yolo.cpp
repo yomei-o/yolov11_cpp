@@ -140,7 +140,9 @@ static int cmd_train(const Args& a) {
 
   auto prov = load_model(weights); Arch11 ARC = load_arch11();
   std::vector<Tensor> params; for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind==1){params.push_back(L.gamma);params.push_back(L.beta);} else params.push_back(L.b); }
-  Adam opt(params, 2e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
+  float lr0 = a.getf("lr", 1e-3f);                    // fine-tune default; 2e-3 destroys pretrained
+  int warmup = a.geti("warmup", std::max(1, ((int)tr.items.size()+BATCH-1)/BATCH));  // ~1 epoch
+  Adam opt(params, lr0, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
 
   struct Lv { int64_t h,w; float s; }; std::vector<Lv> lv = {{S/8,S/8,8.f},{S/16,S/16,16.f},{S/32,S/32,32.f}};
   std::vector<float> ax,ay,ss,anc_img; for (auto& L:lv) for (int64_t y=0;y<L.h;++y) for (int64_t x=0;x<L.w;++x){ax.push_back(x+.5f);ay.push_back(y+.5f);ss.push_back(L.s);anc_img.push_back((x+.5f)*L.s);anc_img.push_back((y+.5f)*L.s);}
@@ -177,7 +179,7 @@ static int cmd_train(const Args& a) {
       auto tal = tal_assign(pss,pdb,anc_img, bt.gt_labels, bt.gt_boxes, bt.mask, B,A,Mx,NC0,10,0.5f,6.0f);
       auto Lo = pure_v8_loss(pd,ps,ancx,ancy,strd,tal.tb,tal.ts,R,NC0,RM);
       backward(Lo.total);
-      opt.lr = cosine_lr(gstep, total, 2e-3f, std::max(1,total/20)); opt.step(); ++gstep;
+      opt.lr = cosine_lr(gstep, total, lr0, warmup); opt.step(); ++gstep;
       eloss += Lo.total->data[0]; ++nb; free_graph(Lo.total);
     }
     Dataset vac = va; double m50 = run_val(vac, prov, ARC, S);

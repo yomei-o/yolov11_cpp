@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
   ProviderU prov; { std::ifstream t(initpt); if (t.good()) { printf("init weights <- %s (pure C++)\n", initpt.c_str()); prov = load_net_unfused_pt(DN, initpt); } else prov = load_net_unfused(DN); }
   Arch11 ARC; { std::ifstream f(DN + "arch11.txt"); f >> ARC.psa_n; int64_t n,c,i; while (f >> n >> c >> i) ARC.c3.push_back({n,i,(bool)c}); }
   std::vector<Tensor> params; for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind==1){params.push_back(L.gamma);params.push_back(L.beta);} else params.push_back(L.b); }
-  Adam opt(params, 2e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
+  Adam opt(params, 1e-3f, 0.9f, 0.999f, 1e-8f, 5e-4f, false);
 
   // anchors for imgsz S (strides 8/16/32)
   struct Lv { int64_t h,w; float s; }; std::vector<Lv> lv = {{S/8,S/8,8.f},{S/16,S/16,16.f},{S/32,S/32,32.f}};
@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
       auto tal = tal_assign(pss,pdb,anc_img, bt.gt_labels, bt.gt_boxes, bt.mask, B,A,Mx,NC,10,0.5f,6.0f);
       auto Lo = pure_v8_loss(pd,ps,ancx,ancy,strd,tal.tb,tal.ts,R,NC,RM);
       backward(Lo.total);
-      opt.lr = cosine_lr(gstep, total, 2e-3f, std::max(1, total/20)); opt.step(); ++gstep;
+      opt.lr = cosine_lr(gstep, total, 1e-3f, std::max(1, total/20)); opt.step(); ++gstep;
       eloss += Lo.total->data[0]; ++nb; free_graph(Lo.total);
     }
     double m50 = validate();
