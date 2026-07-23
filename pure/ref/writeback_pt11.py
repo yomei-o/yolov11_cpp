@@ -1,6 +1,6 @@
 """yolo11 .pt write-back: load the weights the pure C++ trainer wrote (data_wb/), drop
 them into yolo11n in canonical order, verify byte-exact serialization and that the eval
-forward reproduces the C++ forward, then save a runnable yolo11n_cpp.pt."""
+forward reproduces the C++ forward, then save a runnable <model>_cpp.pt."""
 import os, numpy as np, torch
 from ultralytics import YOLO
 from yolo11_walk import walk
@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DN = os.path.join(HERE, "data_net"); DW = os.path.join(HERE, "data_wb")
 def r(n, d=DW): return np.fromfile(os.path.join(d, n), np.float32)
 
-ym = YOLO("yolo11n.pt")
+ym = YOLO((__import__("sys").argv[1] if len(__import__("sys").argv)>1 else "yolo11n")+".pt")
 mods = walk(ym.model.model)
 def load_(param, arr):
     with torch.no_grad(): param.copy_(torch.from_numpy(arr.astype(np.float32)).reshape(param.shape))
@@ -36,7 +36,7 @@ cpp = r("cpp_head.bin")
 d = float(np.abs(head - cpp).max())
 print(f"forward round-trip max|diff| = {d:.3e}  ({'exact-precision' if d < 1e-3 else 'float-accumulation on trained weights'})")
 
-out = "yolo11n_cpp.pt"
+out = (__import__("sys").argv[1] if len(__import__("sys").argv) > 1 else "yolo11n") + "_cpp.pt"
 torch.save({"model": ym.model, "epoch": -1}, out)
 runs = torch.load(out, weights_only=False)["model"] is not None
 print(f"saved {out}; reloads: {'OK' if runs else 'FAIL'}")

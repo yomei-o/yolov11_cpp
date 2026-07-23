@@ -2,6 +2,7 @@
 // updated weights (conv, BN params) back to flat .bin for the Python .pt bridge. Also
 // dumps an eval-mode forward so the round-trip can be checked.
 //   run: m7_train_writeback [iters]   (0 = round-trip check on original weights)
+#include <fstream>
 #include "net11_unfused.hpp"
 #include "v8pure.hpp"
 #include "tal.hpp"
@@ -15,6 +16,7 @@ int main(int argc, char** argv) {
   const std::string D = "pure/ref/data_net/", D2 = "pure/ref/data_wb/";
   std::filesystem::create_directories(D2);
   auto prov = load_net_unfused(D);
+  Arch11 ARC; { std::ifstream f(D + "arch11.txt"); f >> ARC.psa_n; int64_t n,c,i; while (f >> n >> c >> i) ARC.c3.push_back({n,i,(bool)c}); }
   std::vector<Tensor> params;
   for (auto& L : prov.layers) { params.push_back(L.w); if (L.kind == 1) { params.push_back(L.gamma); params.push_back(L.beta); } else params.push_back(L.b); }
   Adam opt(params, 1e-3f, 0.9f, 0.999f, 1e-8f, 0.f, false);
@@ -31,7 +33,7 @@ int main(int argc, char** argv) {
 
   printf("iter |   total     box      cls      dfl\n");
   for (int it = 0; it < ITERS; ++it) {
-    prov.i = 0; auto lvs = yolo11n_forward_u(img, prov, true);
+    prov.i = 0; auto lvs = yolo11n_forward_u(img, prov, true, ARC);
     std::vector<Tensor> bx = {lvs[0].first,lvs[1].first,lvs[2].first}, cs = {lvs[0].second,lvs[1].second,lvs[2].second};
     auto pd = pack_levels(bx, B, A, 4*RM); auto ps = pack_levels(cs, B, A, NC);
     std::vector<float> pdb(R*4),pss(R*NC);
@@ -52,7 +54,7 @@ int main(int argc, char** argv) {
     wr("cw"+s+".bin",L.w->data);
     if(L.kind==1){wr("bg"+s+".bin",L.gamma->data);wr("bb"+s+".bin",L.beta->data);wr("rm"+s+".bin",L.rm);wr("rv"+s+".bin",L.rv);} else wr("cb"+s+".bin",L.b->data); }
   auto x = from_data({1,3,IMG,IMG}, rd(D+"x.bin"));
-  prov.i=0; auto hv = yolo11n_forward_u(x,prov,false);
+  prov.i=0; auto hv = yolo11n_forward_u(x,prov,false,ARC);
   int64_t Atot=0; for(auto&lv:hv) Atot+=lv.first->shape[2]*lv.first->shape[3];
   int64_t NB=hv[0].first->shape[1], NS=hv[0].second->shape[1];
   std::vector<float> head; head.reserve((NB+NS)*Atot);

@@ -7,7 +7,8 @@ from yolo11_walk import walk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = os.path.join(HERE, "data_net"); os.makedirs(D, exist_ok=True)
-ym = YOLO("yolo11n.pt"); mods = walk(ym.model.model.eval())
+import sys
+ym = YOLO((sys.argv[1] if len(sys.argv)>1 else "yolo11n") + ".pt"); mods = walk(ym.model.model.eval())
 
 def save(n, t): t.detach().contiguous().float().cpu().numpy().tofile(os.path.join(D, n))
 lines = [str(len(mods))]

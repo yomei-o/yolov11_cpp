@@ -80,8 +80,9 @@ inline Tensor attentionU(const Tensor& x, ProviderU& p, int64_t heads, int64_t k
   auto pev = applyU(concat_batch(vf_b), pe, tr);
   return applyU(add(xa, pev), proj, tr);
 }
-inline Tensor c2psaU(const Tensor& x, ProviderU& p, int64_t n, int64_t heads, int64_t kd, int64_t hd, bool tr) {
+inline Tensor c2psaU(const Tensor& x, ProviderU& p, int64_t n, bool tr) {
   auto y = applyU(x, p.next(), tr); int64_t twoc = y->shape[1], dim = twoc / 2;
+  int64_t heads = dim / 64, kd = 32, hd = 64;
   auto a = slice_ch(y, 0, dim); auto b = slice_ch(y, dim, twoc);
   for (int64_t j = 0; j < n; ++j) { b = add(b, attentionU(b, p, heads, kd, hd, tr));
     auto f = applyU(b, p.next(), tr); f = applyU(f, p.next(), tr); b = add(b, f); }
@@ -93,17 +94,19 @@ inline std::pair<Tensor, Tensor> detect_level_u(const Tensor& x, ProviderU& p, b
   auto cls = applyU(hc, p.next(), tr);
   return {box, cls};
 }
-inline std::vector<std::pair<Tensor, Tensor>> yolo11n_forward_u(const Tensor& x, ProviderU& p, bool tr) {
+inline std::vector<std::pair<Tensor, Tensor>> yolo11n_forward_u(const Tensor& x, ProviderU& p, bool tr,
+                                                               const Arch11& A = arch11_n()) {
+  auto C = [&](const Tensor& t, int i){ return c3k2U(t, p, A.c3[i].n, A.c3[i].c3k, A.c3[i].inner, true, tr); };
   auto x0 = cLU(x, p, tr); auto x1 = cLU(x0, p, tr);
-  auto x2 = c3k2U(x1, p, 1, false, 0, true, tr); auto x3 = cLU(x2, p, tr);
-  auto x4 = c3k2U(x3, p, 1, false, 0, true, tr); auto x5 = cLU(x4, p, tr);
-  auto x6 = c3k2U(x5, p, 1, true, 2, true, tr); auto x7 = cLU(x6, p, tr);
-  auto x8 = c3k2U(x7, p, 1, true, 2, true, tr); auto x9 = sppfU(x8, p, tr);
-  auto x10 = c2psaU(x9, p, 1, 2, 32, 64, tr);
-  auto x11 = upsample_nearest(x10, 2); auto x12 = concat_ch({x11, x6}); auto x13 = c3k2U(x12, p, 1, false, 0, true, tr);
-  auto x14 = upsample_nearest(x13, 2); auto x15 = concat_ch({x14, x4}); auto x16 = c3k2U(x15, p, 1, false, 0, true, tr);
-  auto x17 = cLU(x16, p, tr); auto x18 = concat_ch({x17, x13}); auto x19 = c3k2U(x18, p, 1, false, 0, true, tr);
-  auto x20 = cLU(x19, p, tr); auto x21 = concat_ch({x20, x10}); auto x22 = c3k2U(x21, p, 1, true, 2, true, tr);
+  auto x2 = C(x1, 0); auto x3 = cLU(x2, p, tr);
+  auto x4 = C(x3, 1); auto x5 = cLU(x4, p, tr);
+  auto x6 = C(x5, 2); auto x7 = cLU(x6, p, tr);
+  auto x8 = C(x7, 3); auto x9 = sppfU(x8, p, tr);
+  auto x10 = c2psaU(x9, p, A.psa_n, tr);
+  auto x11 = upsample_nearest(x10, 2); auto x12 = concat_ch({x11, x6}); auto x13 = C(x12, 4);
+  auto x14 = upsample_nearest(x13, 2); auto x15 = concat_ch({x14, x4}); auto x16 = C(x15, 5);
+  auto x17 = cLU(x16, p, tr); auto x18 = concat_ch({x17, x13}); auto x19 = C(x18, 6);
+  auto x20 = cLU(x19, p, tr); auto x21 = concat_ch({x20, x10}); auto x22 = C(x21, 7);
   std::vector<std::pair<Tensor, Tensor>> out;
   for (auto& xi : {x16, x19, x22}) out.push_back(detect_level_u(xi, p, tr));
   return out;
