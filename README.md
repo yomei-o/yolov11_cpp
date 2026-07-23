@@ -68,13 +68,25 @@ two tiny text files that ship in the repo — `pure/ref/data_net/manifest_unfuse
 **Standard datasets + mosaic.** `train_cli` also reads a **standard Ultralytics/YOLO
 dataset** — pass an images directory (or a list file) plus an `imgsz`, and it scans
 `images/`↔`labels/`, reads normalised `cls xc yc w h` labels, and letterboxes arbitrary-size
-images. A 7th arg toggles **mosaic** augmentation (on by default in this mode; flip +
-brightness always on):
+images. A 7th arg toggles **mosaic**; an 8th sets **close-mosaic** (disable for the last N
+epochs). Augmentation is **mosaic + mixup + random-affine + HSV + flip** (`AugCfg` in
+`pure/dataset.hpp`):
 ```sh
 python pure/ref/make_synth_yolo.py 40      # tiny dataset in the standard images/ + labels/ layout
-./train_cli pure/ref/data_yolo/images/train pure/ref/data_yolo/images/val 6 4 init.pt 128 1
-#   fmt=yolo mosaic=1 ...  (mosaic=0 -> ingestion-only converges high on the synthetic set)
+./train_cli pure/ref/data_yolo/images/train pure/ref/data_yolo/images/val 6 4 init.pt 96 1
+#   fmt=yolo mosaic=1 ...  (use imgsz<=96 for yolo11: C2PSA attention OOMs at 128 B=4)
 ```
+
+**Unified CLI + `data.yaml`.** `pure/yolo.cpp` is a single `yolo` command reading a standard
+Ultralytics `data.yaml` (`path`/`train`/`val`/`nc`/`names`):
+```sh
+cc11.sh -std:c++20 -O2 -EHsc -Ipure/third_party pure/yolo.cpp -Fe:yolo.exe
+./yolo train  --data data.yaml --weights init.pt --imgsz 96 --epochs 100 --batch 16 \
+              --mosaic 1 --mixup 1 --close-mosaic 10       # HSV/affine/flip on by default
+./yolo val    --data data.yaml --weights best.pt --imgsz 96   # -> mAP@0.5 and mAP@0.5:0.95
+./yolo detect --weights best.pt --source img.jpg --out out.png --data data.yaml
+```
+`yolo export` currently points at the standalone `onnx_export11`.
 
 **All sizes.** The generator is size-agnostic — it just reads the arch files. Every size's
 `manifest_unfused.txt` + `names.txt` ship under `pure/ref/arch/<model>/` (n/s/m/l/x), so
@@ -89,8 +101,8 @@ arch from the manifest, tensors looked up by `names.txt` key) when present, else
 → `init.pt` → `train_cli`. (Regenerate the synthetic set with `python pure/ref/make_synth.py
 96 24` — the one Python touch, only to fabricate demo images.)
 
-**Remaining work** (real-dataset convergence parity, richer augmentation, `data.yaml`/unified
-CLI, EMA/resume, speed) is tracked in **[RESUME.md](RESUME.md)**.
+**Remaining work** (real-dataset convergence parity, custom `nc`, in-CLI export, EMA/resume,
+speed, Apple-Silicon BLAS) is tracked in **[RESUME.md](RESUME.md)**.
 
 ## Demo — real-image detection, no Python, no libraries
 Weights ship in `weights/yolo11n/`, so the pure detector runs from a checkout with only a
