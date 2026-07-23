@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include "parallel.hpp"
+#include "backend.hpp"   // bk::gemm_hosted device seam (CUDA / CPU)
 
 struct Node;
 using Tensor = std::shared_ptr<Node>;
@@ -202,12 +203,13 @@ inline Tensor conv2d(const Tensor& in, const Tensor& w, const Tensor& bias,
     thread_local std::vector<float> colf; colf.resize(K * P);
     for (int64_t g = 0; g < groups; ++g) {
       im2col_(in->data.data() + (n * Cin + g * Cin_g) * H * W, Cin_g, H, W, kh, kw, OH, OW, stride, pad, colf.data());
-      const float* colp = colf.data(); float* On = O + n * Cout * P;
-      parallel_for(Cout_g, [&](int64_t cog) {
-        int64_t co = g * Cout_g + cog; float* orow = On + co * P;
-        float b = B ? B[co] : 0.f; for (int64_t p = 0; p < P; ++p) orow[p] = b;
-        const float* wrow = Wd + co * K;
-        for (int64_t k = 0; k < K; ++k) { float wv = wrow[k]; const float* crow = colp + k * P; for (int64_t p = 0; p < P; ++p) orow[p] += wv * crow[p]; }
+      float* On = O + n * Cout * P;
+      float* Ong = On + (g * Cout_g) * P;          // output rows for this group
+      const float* Wg = Wd + (g * Cout_g) * K;     // weight rows for this group
+      bk::gemm_hosted(Wg, colf.data(), Ong, Cout_g, K, P);   // (Cout_g,P) = W(Cout_g,K) @ col(K,P)
+      if (B) parallel_for(Cout_g, [&](int64_t cog) {         // add bias per row
+        int64_t co = g * Cout_g + cog; float b = B[co]; float* orow = On + co * P;
+        for (int64_t p = 0; p < P; ++p) orow[p] += b;
       });
     }
   }
