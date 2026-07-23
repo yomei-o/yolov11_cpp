@@ -11,19 +11,27 @@ import sys
 ym = YOLO((sys.argv[1] if len(sys.argv)>1 else "yolo11n") + ".pt"); mods = walk(ym.model.model.eval())
 
 def save(n, t): t.detach().contiguous().float().cpu().numpy().tofile(os.path.join(D, n))
+qn = {id(m): nm for nm, m in ym.model.named_modules()}   # module -> state_dict prefix ("model.X...")
 lines = [str(len(mods))]
+names = []            # state_dict KEY per emitted tensor, in engine (walk) order — the engine's
+                      # C3k2 emit order differs from state_dict order, so the C++ checkpointer
+                      # must pair by NAME (load_state_dict matches by key).
 for i, (kind, mod) in enumerate(mods):
+    p = qn[id(mod)]
     if kind == "conv":
         conv, bn = mod.conv, mod.bn
         act = 1 if isinstance(mod.act, nn.SiLU) else 0
         save(f"cw{i}.bin", conv.weight)
         save(f"bg{i}.bin", bn.weight); save(f"bb{i}.bin", bn.bias)
         save(f"rm{i}.bin", bn.running_mean); save(f"rv{i}.bin", bn.running_var)
+        names += [f"{p}.conv.weight", f"{p}.bn.weight", f"{p}.bn.bias", f"{p}.bn.running_mean", f"{p}.bn.running_var"]
         Co, Ci = conv.weight.shape[0], conv.weight.shape[1]
         lines.append(f"1 {Co} {Ci} {conv.kernel_size[0]} {conv.stride[0]} {conv.padding[0]} {conv.groups} {bn.eps} {act}")
     else:
         save(f"cw{i}.bin", mod.weight); save(f"cb{i}.bin", mod.bias)
+        names += [f"{p}.weight", f"{p}.bias"]
         Co, Ci = mod.weight.shape[0], mod.weight.shape[1]
         lines.append(f"0 {Co} {Ci} {mod.kernel_size[0]} {mod.stride[0]} {mod.padding[0]} {mod.groups} 0 0")
 open(os.path.join(D, "manifest_unfused.txt"), "w").write("\n".join(lines) + "\n")
-print(f"unfused: {len(mods)} layers")
+open(os.path.join(D, "names.txt"), "w").write("\n".join(names) + "\n")
+print(f"unfused: {len(mods)} layers, {len(names)} tensors")
