@@ -9,7 +9,8 @@ int main() {
   std::ifstream io(D + "io.txt"); int64_t IMG; io >> IMG;
   auto x = from_data({1, 3, IMG, IMG}, rd(D + "x.bin"));
 
-  auto levels = yolo11n_forward(x, prov);
+  Arch11 A; { std::ifstream f(D + "arch11.txt"); f >> A.psa_n; int64_t n,c,i; while (f >> n >> c >> i) A.c3.push_back({n,i,(bool)c}); }
+  auto levels = yolo11n_forward(x, prov, A);
   printf("consumed %zu/%zu convs\n", prov.i, prov.convs.size());
 
   int64_t Atot = 0; for (auto& lv : levels) Atot += lv.first->shape[2] * lv.first->shape[3];

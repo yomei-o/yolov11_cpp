@@ -9,8 +9,9 @@ from ultralytics.nn.modules.block import C3k
 HERE = os.path.dirname(os.path.abspath(__file__))
 D = os.path.join(HERE, "data_net"); os.makedirs(D, exist_ok=True)
 IMG = int(sys.argv[1]) if len(sys.argv) > 1 else 64
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "yolo11n"
 
-ym = YOLO("yolo11n.pt"); L = ym.model.model.eval()
+ym = YOLO(MODEL + ".pt"); L = ym.model.model.eval()
 convs = []   # (w, b, k, s, pad, groups, act)
 def fuse(cv):
     conv, bn = cv.conv, cv.bn
@@ -55,6 +56,14 @@ for i, (w, b, k, s, p, g, act) in enumerate(convs):
     blob.append(w.detach().cpu().numpy().ravel()); blob.append(b.detach().cpu().numpy().ravel())
     lines.append(f"{w.shape[0]} {w.shape[1]} {k} {s} {p} {g} {act}")
 open(os.path.join(D, "manifest.txt"), "w").write("\n".join(lines) + "\n")
+_arch = []; _psa = 1
+for _m in L:
+    _t = type(_m).__name__
+    if _t == "C3k2":
+        _c3k = isinstance(_m.m[0], C3k); _inn = len(_m.m[0].m) if _c3k else 0
+        _arch.append((len(_m.m), 1 if _c3k else 0, _inn))
+    elif _t == "C2PSA": _psa = len(_m.m)
+open(os.path.join(D, "arch11.txt"), "w").write(f"{_psa}\n" + "\n".join(f"{n} {c} {i}" for n,c,i in _arch) + "\n")
 import numpy as np
 np.concatenate(blob).astype(np.float32).tofile(os.path.join(D, "weights.bin"))
 

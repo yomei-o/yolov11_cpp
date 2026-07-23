@@ -117,9 +117,10 @@ inline Tensor attention(const Tensor& x, Provider& p, int64_t heads, int64_t key
   auto pev = conv_apply(concat_batch(vf_b), pe);       // depthwise pe, act=False
   return conv_apply(add(xa, pev), proj);               // proj, act=False
 }
-inline Tensor c2psa(const Tensor& x, Provider& p, int64_t n, int64_t heads, int64_t key_dim, int64_t head_dim) {
+inline Tensor c2psa(const Tensor& x, Provider& p, int64_t n) {
   auto y = conv_apply(x, p.next());                     // cv1 -> 2*dim
   int64_t twoc = y->shape[1], dim = twoc / 2;
+  int64_t heads = dim / 64, key_dim = 32, head_dim = 64;  // ultralytics: num_heads=c//64
   auto a = slice_ch(y, 0, dim); auto b = slice_ch(y, dim, twoc);
   for (int64_t j = 0; j < n; ++j) {
     b = add(b, attention(b, p, heads, key_dim, head_dim));          // b + attn(b)
@@ -136,31 +137,40 @@ inline std::pair<Tensor, Tensor> detect_level(const Tensor& x, Provider& p) {
   return {box, cls};
 }
 
-// Full yolo11n. Returns the 3 (box,cls) level pairs (raw, pre-DFL).
-inline std::vector<std::pair<Tensor, Tensor>> yolo11n_forward(const Tensor& x, Provider& p) {
+// Per-scale architecture descriptor. c3[8] = the 8 C3k2 blocks (x2,x4,x6,x8,x13,x16,
+// x19,x22) as {n, is_c3k, inner_n}; psa_n = C2PSA repeats. Widths stay data-driven.
+struct C3D { int64_t n, inner; bool c3k; };
+struct Arch11 { std::vector<C3D> c3; int64_t psa_n; };
+inline Arch11 arch11_n() { return {{{1,0,false},{1,0,false},{1,2,true},{1,2,true},
+                                    {1,0,false},{1,0,false},{1,0,false},{1,2,true}}, 1}; }
+
+// Full yolo11 (n/s/m/l/x). Returns the 3 (box,cls) level pairs (raw, pre-DFL).
+inline std::vector<std::pair<Tensor, Tensor>> yolo11n_forward(const Tensor& x, Provider& p,
+                                                              const Arch11& A = arch11_n()) {
+  auto C = [&](const Tensor& t, int i){ return c3k2(t, p, A.c3[i].n, A.c3[i].c3k, A.c3[i].inner, true); };
   auto x0 = cL(x, p);
   auto x1 = cL(x0, p);
-  auto x2 = c3k2(x1, p, 1, false, 0, true);
+  auto x2 = C(x1, 0);
   auto x3 = cL(x2, p);
-  auto x4 = c3k2(x3, p, 1, false, 0, true);
+  auto x4 = C(x3, 1);
   auto x5 = cL(x4, p);
-  auto x6 = c3k2(x5, p, 1, true, 2, true);
+  auto x6 = C(x5, 2);
   auto x7 = cL(x6, p);
-  auto x8 = c3k2(x7, p, 1, true, 2, true);
+  auto x8 = C(x7, 3);
   auto x9 = sppf(x8, p);
-  auto x10 = c2psa(x9, p, 1, 2, 32, 64);
+  auto x10 = c2psa(x9, p, A.psa_n);
   auto x11 = upsample_nearest(x10, 2);
   auto x12 = concat_ch({x11, x6});
-  auto x13 = c3k2(x12, p, 1, false, 0, true);
+  auto x13 = C(x12, 4);
   auto x14 = upsample_nearest(x13, 2);
   auto x15 = concat_ch({x14, x4});
-  auto x16 = c3k2(x15, p, 1, false, 0, true);           // P3
+  auto x16 = C(x15, 5);                                  // P3
   auto x17 = cL(x16, p);
   auto x18 = concat_ch({x17, x13});
-  auto x19 = c3k2(x18, p, 1, false, 0, true);           // P4
+  auto x19 = C(x18, 6);                                  // P4
   auto x20 = cL(x19, p);
   auto x21 = concat_ch({x20, x10});
-  auto x22 = c3k2(x21, p, 1, true, 2, true);            // P5
+  auto x22 = C(x21, 7);                                  // P5
   std::vector<std::pair<Tensor, Tensor>> out;
   for (auto& xi : {x16, x19, x22}) out.push_back(detect_level(xi, p));
   return out;
