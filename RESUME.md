@@ -43,3 +43,5 @@ this file is the forward-looking TODO.
 - Attention was once B=1-only (crashed at B≥2, heap OOB found via `cl /fsanitize=address`);
   fixed with slice/concat_batch + per-batch attention + iterative build_topo + `free_graph`.
 - Build: MSVC via `C:/prog/claude/cc11.sh`; `scratch/` must pre-exist.
+
+7. **Verify the unified `train_cli`/`yolo.cpp` under a CUDA build** — compile with `nvcc -DUSE_CUDA` and run COCO128 end-to-end on a (free-Colab) T4. The CUDA seam + a training loop were verified on T4, but the new dataset-ingestion + augmentation CLI path has not been built/run under nvcc yet (aug/dataset are host-side; conv/matmul auto-route to `bk::` on GPU). Est. COCO128/640px/100ep: T4 GPU ~7-20 min; CPU ~a day (measured ~5.7 s/image fwd+bwd at 640px, naive GEMM) so a real GPU is the fix.
