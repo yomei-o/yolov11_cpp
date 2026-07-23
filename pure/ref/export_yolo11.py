@@ -59,8 +59,8 @@ import numpy as np
 np.concatenate(blob).astype(np.float32).tofile(os.path.join(D, "weights.bin"))
 
 torch.manual_seed(0)
-x = torch.randn(1, 3, IMG, IMG)
-dm = ym.model.float(); dm.train()
+x = torch.randn(1, 3, IMG, IMG).cpu()
+dm = ym.model.float().cpu(); dm.train()   # force CPU (reference is CPU-computed; safe on GPU hosts)
 for mod in dm.modules():
     if isinstance(mod, torch.nn.BatchNorm2d): mod.eval()
 with torch.no_grad(): y = dm(x)
