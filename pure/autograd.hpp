@@ -228,15 +228,12 @@ inline Tensor conv2d(const Tensor& in, const Tensor& w, const Tensor& bias,
         im2col_(in->data.data() + (n * Cin + g * Cin_g) * H * W, Cin_g, H, W, kh, kw, OH, OW, stride, pad, colb.data());
         const float* colp = colb.data();
         const float* GOn = op->grad.data() + n * Cout * P;
-        parallel_for(Cout_g, [&](int64_t cog) {
-          int64_t co = g * Cout_g + cog; const float* gr = GOn + co * P; float* gk = GK + co * K;
-          for (int64_t k = 0; k < K; ++k) { const float* crow = colp + k * P; float a = 0; for (int64_t p = 0; p < P; ++p) a += gr[p] * crow[p]; gk[k] += a; }
-        });
-        thread_local std::vector<float> dcolb; dcolb.assign(K * P, 0.f); float* dcol = dcolb.data();
-        parallel_for(K, [&](int64_t k) {
-          float* dcrow = dcol + k * P;
-          for (int64_t cog = 0; cog < Cout_g; ++cog) { int64_t co = g * Cout_g + cog; float wv = Wd[co * K + k]; const float* gr = GOn + co * P; for (int64_t p = 0; p < P; ++p) dcrow[p] += wv * gr[p]; }
-        });
+        const float* GOng = GOn + (g * Cout_g) * P;      // this group's dO rows
+        // dW_g(Cout_g,K) += dO_g(Cout_g,P) @ col(K,P)^T
+        bk::gemm_nt_hosted(GOng, colp, GK + (g * Cout_g) * K, Cout_g, K, P, 1.f);
+        // dcol(K,P) = W_g(Cout_g,K)^T @ dO_g(Cout_g,P)
+        thread_local std::vector<float> dcolb; dcolb.resize(K * P); float* dcol = dcolb.data();
+        bk::gemm_tn_hosted(Wd + (g * Cout_g) * K, GOng, dcol, K, P, Cout_g, 0.f);
         float* GIn = GI + (n * Cin + g * Cin_g) * H * W;
         parallel_for(Cin_g, [&](int64_t cig) {
           for (int64_t r = 0; r < kh; ++r)
